@@ -11,5 +11,7 @@
 .env
 docker-output/
 
-keypair.json
+keypair/
 *.pem
+
+log/
