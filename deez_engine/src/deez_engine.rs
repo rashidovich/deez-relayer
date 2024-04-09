@@ -1,8 +1,13 @@
-use std::{net::{SocketAddr, ToSocketAddrs}, sync::Arc, thread::{Builder, JoinHandle}, time::{Duration, Instant}};
 use jito_block_engine::block_engine::BlockEnginePackets;
 use log::*;
 use quinn::{ConnectError, Connection, ConnectionError, Endpoint, SendDatagramError};
 use solana_sdk::transaction::VersionedTransaction;
+use std::{
+    net::{SocketAddr, ToSocketAddrs},
+    sync::Arc,
+    thread::{Builder, JoinHandle},
+    time::{Duration, Instant},
+};
 use thiserror::Error;
 use tokio::{
     runtime::Runtime,
@@ -87,7 +92,7 @@ impl DeezEngineRelayerHandler {
                                     error!("failed to connect to mempool engine: {:?}, retrying", e);
                                 }
                             }
-                           
+
                             sleep(Duration::from_secs(2)).await;
                         }
                     }
@@ -116,7 +121,7 @@ impl DeezEngineRelayerHandler {
         let forwarder = Arc::new(Mutex::new(deez_engine_stream));
         let mut heartbeat_interval = interval(Duration::from_secs(5));
         let (forward_error_sender, mut forward_error_receiver) = mpsc::unbounded_channel();
-         
+
         loop {
             let cloned_forwarder = forwarder.clone();
             let cloned_error_sender = forward_error_sender.clone();
@@ -139,6 +144,12 @@ impl DeezEngineRelayerHandler {
                                                 Ok(data) => data,
                                                 Err(_) => continue, // Handle serialization error or log it as needed
                                             };
+
+                                            if tx_data.len() > 1252 {
+                                                warn!("skipping packet forward, packet size {} > MAX_QUIC_PACKET_SIZE. Logging packet to file", tx_data.len());
+                                                error!("{tx_data:?}");
+                                                continue
+                                            }
 
                                             if let Err(e) = Self::forward_packets(cloned_forwarder.clone(), tx_data).await {
                                                 if let Err(send_err) = cloned_error_sender.send(e) {
@@ -166,7 +177,14 @@ impl DeezEngineRelayerHandler {
                 forward_error = forward_error_receiver.recv() => {
                     match forward_error {
                         Some(e) => {
-                            return Err(DeezEngineError::QuicPacketForward(e))
+                            match e  {
+                                SendDatagramError::Disabled | SendDatagramError::ConnectionLost(_) => {
+                                    return Err(DeezEngineError::QuicPacketForward(e))
+                                },
+                                _ => {
+                                    error!("failed to forward packets: {}", e)
+                                },
+                            }
                         },
                         None => continue,
                     }
@@ -222,11 +240,16 @@ impl DeezEngineRelayerHandler {
         let client_config = configure_client();
         let mut endpoint = Endpoint::client("0.0.0.0:6969".parse::<SocketAddr>().unwrap())?;
         endpoint.set_default_client_config(client_config);
-        
+
         for address in engine_url.to_socket_addrs().unwrap() {
-            endpoint.connect(address, engine_url.split(':').collect::<Vec<&str>>()[0])?.await?;
-            
-            if let Ok(connection) = endpoint.connect(address, engine_url.split(':').collect::<Vec<&str>>()[0])?.await {
+            endpoint
+                .connect(address, engine_url.split(':').collect::<Vec<&str>>()[0])?
+                .await?;
+
+            if let Ok(connection) = endpoint
+                .connect(address, engine_url.split(':').collect::<Vec<&str>>()[0])?
+                .await
+            {
                 info!("successfully connected to deez QUIC engine");
                 return Ok(connection);
             } else {
@@ -234,22 +257,19 @@ impl DeezEngineRelayerHandler {
             }
         }
 
-        Err(DeezEngineError::Engine("failed to connect to suitable socket address".to_string()))
+        Err(DeezEngineError::Engine(
+            "failed to connect to suitable socket address".to_string(),
+        ))
     }
 
     async fn forward_packets(
         connection: Arc<Mutex<Connection>>,
         data: Vec<u8>,
     ) -> Result<(), SendDatagramError> {
-        connection 
-            .lock()
-            .await
-            .send_datagram(data.into())
+        connection.lock().await.send_datagram(data.into())
     }
 
     pub fn join(self) {
         self.deez_engine_forwarder.join().unwrap();
     }
 }
-
-

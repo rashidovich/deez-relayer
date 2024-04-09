@@ -16,9 +16,9 @@ use std::{
 use clap::Parser;
 use crossbeam_channel::tick;
 use dashmap::DashMap;
+use deez_engine::deez_engine::DeezEngineRelayerHandler;
 use env_logger::Env;
 use jito_block_engine::block_engine::{BlockEngineConfig, BlockEngineRelayerHandler};
-use deez_engine::deez_engine::DeezEngineRelayerHandler;
 use jito_core::{
     graceful_panic,
     tpu::{Tpu, TpuSockets},
@@ -35,9 +35,18 @@ use jito_relayer::{
 };
 use jito_relayer_web::{start_relayer_web_server, RelayerState};
 use jito_rpc::load_balancer::LoadBalancer;
-use jito_transaction_relayer::forwarder::{start_forward_and_delay_thread, BLOCK_ENGINE_FORWARDER_QUEUE_CAPACITY};
+use jito_transaction_relayer::forwarder::{
+    start_forward_and_delay_thread, BLOCK_ENGINE_FORWARDER_QUEUE_CAPACITY,
+};
 use jwt::{AlgorithmType, PKeyWithDigest};
-use log::{debug, error, info, warn};
+use log::{debug, error, info, warn, LevelFilter};
+use log4rs::{
+    append::{console::ConsoleAppender, file::FileAppender},
+    config::{Appender, Root},
+    encode::pattern::PatternEncoder,
+    filter::threshold::ThresholdFilter,
+    Logger,
+};
 use openssl::{hash::MessageDigest, pkey::PKey};
 use solana_address_lookup_table_program::state::AddressLookupTable;
 use solana_metrics::{datapoint_error, datapoint_info};
@@ -247,10 +256,45 @@ fn main() {
     const MAX_BUFFERED_REQUESTS: usize = 10;
     const REQUESTS_PER_SECOND: u64 = 5;
 
-    // one can override the default log level by setting the env var RUST_LOG
-    env_logger::Builder::from_env(Env::new().default_filter_or("info"))
-        .format_timestamp_millis()
-        .init();
+    // // one can override the default log level by setting the env var RUST_LOG
+    // env_logger::Builder::from_env(Env::new().default_filter_or("info"))
+    //     .format_timestamp_millis()
+    //     .init();
+
+    let stdout = ConsoleAppender::builder()
+        .encoder(Box::new(PatternEncoder::new(
+            "{d(%Y-%m-%d %H:%M:%S)} {h({l})} {t} - {m}{n}",
+        )))
+        .build();
+
+    let packets = FileAppender::builder()
+        .encoder(Box::new(PatternEncoder::new(
+            "{d(%Y-%m-%d %H:%M:%S)} {h({l})} {t} - {m}{n}",
+        )))
+        .build("log/packets.log")
+        .unwrap();
+
+    let config = log4rs::Config::builder()
+        .appender(
+            Appender::builder()
+                .filter(Box::new(ThresholdFilter::new(LevelFilter::Info)))
+                .build("stdout", Box::new(stdout)),
+        )
+        .appender(
+            Appender::builder()
+                .filter(Box::new(ThresholdFilter::new(LevelFilter::Warn)))
+                .build("packets", Box::new(packets)),
+        )
+        .build(
+            Root::builder()
+                .appender("stdout")
+                .appender("packets")
+                .build(LevelFilter::Info),
+        )
+        .unwrap();
+
+    let _handle = log4rs::init_config(config).unwrap();
+    info!("intiated log4rs");
 
     let args: Args = Args::parse();
     info!("args: {:?}", args);
@@ -363,8 +407,7 @@ fn main() {
     // tracked as forwarder_metrics.block_engine_sender_len
     let (block_engine_sender, block_engine_receiver) =
         channel(BLOCK_ENGINE_FORWARDER_QUEUE_CAPACITY);
-        // channel(jito_transaction_relayer::forwarder::BLOCK_ENGINE_FORWARDER_QUEUE_CAPACITY);
-
+    // channel(jito_transaction_relayer::forwarder::BLOCK_ENGINE_FORWARDER_QUEUE_CAPACITY);
 
     let deez_engine_receiver = block_engine_sender.subscribe();
 
@@ -403,9 +446,7 @@ fn main() {
         ofac_addresses.clone(),
     );
 
-    let deez_engine_forwarder = DeezEngineRelayerHandler::new(
-        deez_engine_receiver,
-    );
+    let deez_engine_forwarder = DeezEngineRelayerHandler::new(deez_engine_receiver);
 
     // receiver tracked as relayer_metrics.slot_receiver_len
     // downstream channel gets data that was duplicated by HealthManager
