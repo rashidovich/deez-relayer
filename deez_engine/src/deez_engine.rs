@@ -6,6 +6,7 @@ use std::{
 };
 
 use base64::{engine::general_purpose, Engine};
+use dashmap::DashSet;
 use jito_block_engine::block_engine::BlockEnginePackets;
 use log::*;
 use solana_sdk::transaction::VersionedTransaction;
@@ -81,7 +82,7 @@ impl DeezEngineRelayerHandler {
                                     error!("failed to connect to mempool engine: {:?}, retrying", e);
                                 }
                             }
-                           
+
                             sleep(Duration::from_secs(2)).await;
                         }
                     }
@@ -109,11 +110,14 @@ impl DeezEngineRelayerHandler {
     ) -> DeezEngineResult<()> {
         let forwarder = Arc::new(Mutex::new(deez_engine_stream));
         let mut heartbeat_interval = interval(Duration::from_secs(5));
+        let mut flush_interval = interval(Duration::from_secs(60));
+        let unique: DashSet<String> = DashSet::new();
         let (forward_error_sender, mut forward_error_receiver) = mpsc::unbounded_channel();
-         
+
         loop {
             let cloned_forwarder = forwarder.clone();
             let cloned_error_sender = forward_error_sender.clone();
+            let cloned_unique = unique.clone();
 
             select! {
                 recv_result = deez_engine_receiver.recv() => {
@@ -133,8 +137,13 @@ impl DeezEngineRelayerHandler {
                                                 Ok(data) => data,
                                                 Err(_) => continue, // Handle serialization error or log it as needed
                                             };
-                                        
+
                                             let base64_encoded_tx = general_purpose::STANDARD.encode(tx_data);
+
+                                            if cloned_unique.contains(&base64_encoded_tx) {
+                                                continue;
+                                            }
+
                                             let delimited_tx_data = format!("{}\n", base64_encoded_tx);
 
                                             if let Err(e) = Self::forward_packets(cloned_forwarder.clone(), delimited_tx_data.as_bytes()).await {
@@ -142,6 +151,7 @@ impl DeezEngineRelayerHandler {
                                                     error!("failed to transmit packet forward error to management channel: {send_err}");
                                                 }
                                             } else {
+                                                cloned_unique.insert(base64_encoded_tx);
                                                 trace!("succesfully relayed packets");
                                             }
                                         }
@@ -171,6 +181,10 @@ impl DeezEngineRelayerHandler {
                 _ = heartbeat_interval.tick() => {
                     info!("sending heartbeat (deez)");
                     Self::forward_packets(cloned_forwarder.clone(), HEARTBEAT_MSG).await?;
+                }
+                _ = flush_interval.tick() => {
+                    info!("flushing signature cache");
+                    unique.clear();
                 }
             }
         }
