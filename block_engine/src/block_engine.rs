@@ -358,8 +358,8 @@ impl BlockEngineRelayerHandler {
     async fn handle_packet_stream(
         block_engine_packet_sender: Sender<PacketBatchUpdate>,
         block_engine_receiver: &mut Receiver<BlockEnginePackets>,
-        _subscribe_aoi_stream: Response<Streaming<AccountsOfInterestUpdate>>,
-        _subscribe_poi_stream: Response<Streaming<ProgramsOfInterestUpdate>>,
+        subscribe_aoi_stream: Response<Streaming<AccountsOfInterestUpdate>>,
+        subscribe_poi_stream: Response<Streaming<ProgramsOfInterestUpdate>>,
         mut auth_client: AuthServiceClient<Channel>,
         keypair: &Arc<Keypair>,
         refresh_token: &mut Token,
@@ -370,8 +370,8 @@ impl BlockEngineRelayerHandler {
         is_connected_to_block_engine: &Arc<AtomicBool>,
         ofac_addresses: &HashSet<Pubkey>,
     ) -> BlockEngineResult<()> {
-        // let mut aoi_stream = subscribe_aoi_stream.into_inner();
-        // let mut poi_stream = subscribe_poi_stream.into_inner();
+        let mut aoi_stream = subscribe_aoi_stream.into_inner();
+        let mut poi_stream = subscribe_poi_stream.into_inner();
 
         // drain old buffered packets before streaming packets to the block engine
         while block_engine_receiver.try_recv().is_ok() {}
@@ -410,7 +410,7 @@ impl BlockEngineRelayerHandler {
 
                     let now = Instant::now();
 
-                    let num_pubkeys = Self::handle_aoi(maybe_aoi, &mut accounts_of_interest)?;
+                    let num_pubkeys = Self::_handle_aoi(maybe_aoi, &mut accounts_of_interest)?;
 
                     block_engine_stats.increment_aoi_update_elapsed_us(now.elapsed().as_micros() as u64);
                     block_engine_stats.increment_aoi_update_count(1);
@@ -421,7 +421,7 @@ impl BlockEngineRelayerHandler {
 
                     let now = Instant::now();
 
-                    let num_pubkeys = Self::handle_poi(maybe_poi, &mut programs_of_interest)?;
+                    let num_pubkeys = Self::_handle_poi(maybe_poi, &mut programs_of_interest)?;
 
                     block_engine_stats.increment_poi_update_elapsed_us(now.elapsed().as_micros() as u64);
                     block_engine_stats.increment_poi_update_count(1);
