@@ -39,7 +39,10 @@ use thiserror::Error;
 use tokio::{
     runtime::Runtime,
     select,
-    sync::{mpsc::{channel, Sender}, broadcast::Receiver},
+    sync::{
+        broadcast::Receiver,
+        mpsc::{channel, Sender},
+    },
     time::{interval, sleep},
 };
 use tokio_stream::wrappers::ReceiverStream;
@@ -402,28 +405,28 @@ impl BlockEngineRelayerHandler {
 
                     heartbeat_count += 1;
                 }
-                // maybe_aoi = aoi_stream.message() => {
-                //     trace!("received aoi message");
+                maybe_aoi = aoi_stream.message() => {
+                    trace!("received aoi message");
 
-                //     let now = Instant::now();
+                    let now = Instant::now();
 
-                //     let num_pubkeys = Self::handle_aoi(maybe_aoi, &mut accounts_of_interest)?;
+                    let num_pubkeys = Self::handle_aoi(maybe_aoi, &mut accounts_of_interest)?;
 
-                //     block_engine_stats.increment_aoi_update_elapsed_us(now.elapsed().as_micros() as u64);
-                //     block_engine_stats.increment_aoi_update_count(1);
-                //     block_engine_stats.increment_aoi_accounts_received(num_pubkeys as u64);
-                // }
-                // maybe_poi = poi_stream.message() => {
-                //     trace!("received poi message");
+                    block_engine_stats.increment_aoi_update_elapsed_us(now.elapsed().as_micros() as u64);
+                    block_engine_stats.increment_aoi_update_count(1);
+                    block_engine_stats.increment_aoi_accounts_received(num_pubkeys as u64);
+                }
+                maybe_poi = poi_stream.message() => {
+                    trace!("received poi message");
 
-                //     let now = Instant::now();
+                    let now = Instant::now();
 
-                //     let num_pubkeys = Self::handle_poi(maybe_poi, &mut programs_of_interest)?;
+                    let num_pubkeys = Self::handle_poi(maybe_poi, &mut programs_of_interest)?;
 
-                //     block_engine_stats.increment_poi_update_elapsed_us(now.elapsed().as_micros() as u64);
-                //     block_engine_stats.increment_poi_update_count(1);
-                //     block_engine_stats.increment_poi_accounts_received(num_pubkeys as u64);
-                // }
+                    block_engine_stats.increment_poi_update_elapsed_us(now.elapsed().as_micros() as u64);
+                    block_engine_stats.increment_poi_update_count(1);
+                    block_engine_stats.increment_poi_accounts_received(num_pubkeys as u64);
+                }
                 block_engine_batches = block_engine_receiver.recv() => {
                     trace!("received block engine batches");
                     let block_engine_batches = block_engine_batches.map_err(|_| BlockEngineError::BlockEngineFailure("block engine packet receiver disconnected".to_string()))?;
@@ -617,7 +620,6 @@ impl BlockEngineRelayerHandler {
     ) -> BlockEngineResult<usize> {
         let num_packets = batch.batch.as_ref().unwrap().packets.len();
 
-
         if let Err(e) = block_engine_packet_sender
             .send(PacketBatchUpdate {
                 msg: Some(Msg::Batches(batch)),
@@ -755,7 +757,7 @@ fn is_aoi_in_lookup_table(
                     if let Some(writable_account) = lookup_info.addresses.get(*idx as usize) {
                         if accounts_of_interest.cache_get(writable_account).is_some()
                             // note: can't detect CPIs without execution, so aggressively forward txs than contain account in POI
-                            // also txs can say programs are write-locked, but they're demoted to read-locked when loaded. 
+                            // also txs can say programs are write-locked, but they're demoted to read-locked when loaded.
                             || programs_of_interest.cache_get(writable_account).is_some()
                         {
                             return true;
