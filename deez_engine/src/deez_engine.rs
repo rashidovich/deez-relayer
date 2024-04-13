@@ -5,7 +5,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use base64::{engine::general_purpose, Engine};
 use jito_block_engine::block_engine::BlockEnginePackets;
 use log::*;
 use solana_sdk::transaction::VersionedTransaction;
@@ -61,7 +60,7 @@ pub struct DeezEngineRelayerHandler {
 }
 
 impl DeezEngineRelayerHandler {
-    pub fn new(mut deez_engine_receiver: Receiver<BlockEnginePackets>) -> DeeFzEngineRelayerHandler {
+    pub fn new(mut deez_engine_receiver: Receiver<BlockEnginePackets>) -> DeezEngineRelayerHandler {
         let deez_engine_forwarder = Builder::new()
             .name("deez_engine_relayer_handler_thread".into())
             .spawn(move || {
