@@ -19,14 +19,22 @@ use tokio::{
     time::{interval, sleep, timeout},
 };
 
-const HEARTBEAT_MSG: &[u8; 5] = b"ping\n";
-const DEEZ_ENGINE_URLS: [&str; 5] = [
-    "ny.engine.deez.wtf",
-    "utah.engine.deez.wtf",
-    "amsterdam.engine.deez.wtf",
-    "london.engine.deez.wtf",
-    "tokyo.engine.deez.wtf",
+const HEARTBEAT_LEN: u16 = 4;
+const HEARTBEAT_MSG: &[u8; 4] = b"ping";
+const HEARTBEAT_MSG_WITH_LENGTH: &[u8; 6] = &[
+    (HEARTBEAT_LEN & 0xFF) as u8,
+    ((HEARTBEAT_LEN >> 8) & 0xFF) as u8,
+    HEARTBEAT_MSG[0],
+    HEARTBEAT_MSG[1],
+    HEARTBEAT_MSG[2],
+    HEARTBEAT_MSG[3],
 ];
+
+const DEEZ_REGIONS: [&str; 1] = [
+    "ny",
+];
+const DEEZ_ENGINE_URL: &str = ".engine.alpha.deez.wtf:50700";
+const DEEZ_PINGER_URL: &str = ".pinger.deez.wtf:50500";
 
 #[derive(Error, Debug)]
 pub enum DeezEngineError {
@@ -129,15 +137,16 @@ impl DeezEngineRelayerHandler {
                                         }
 
                                         if let Ok(tx) = packet.deserialize_slice::<VersionedTransaction, _>(..) {
-                                            let tx_data = match bincode::serialize(&tx) {
+                                            let mut tx_data = match bincode::serialize(&tx) {
                                                 Ok(data) => data,
-                                                Err(_) => continue, // Handle serialization error or log it as needed
+                                                Err(_) => continue,
                                             };
-                                        
-                                            let base64_encoded_tx = general_purpose::STANDARD.encode(tx_data);
-                                            let delimited_tx_data = format!("{}\n", base64_encoded_tx);
 
-                                            if let Err(e) = Self::forward_packets(cloned_forwarder.clone(), delimited_tx_data.as_bytes()).await {
+                                            let length_bytes = (tx_data.len() as u16).to_le_bytes().to_vec();
+                                            tx_data.reserve(2);
+                                            tx_data.splice(0..0, length_bytes);
+
+                                            if let Err(e) = Self::forward_packets(cloned_forwarder.clone(), tx_data.as_bytes()).await {
                                                 if let Err(send_err) = cloned_error_sender.send(e) {
                                                     error!("failed to transmit packet forward error to management channel: {send_err}");
                                                 }
@@ -181,13 +190,13 @@ impl DeezEngineRelayerHandler {
             .timeout(std::time::Duration::from_secs(2))
             .build()?;
 
-        let mut closest_engine = String::new();
+        let mut clostest_region = String::new();
         let mut shortest_time = Duration::from_secs(u64::MAX);
 
-        for &url in DEEZ_ENGINE_URLS.iter() {
+        for &region in DEEZ_REGIONS.iter() {
             let start = Instant::now();
             let result = client
-                .get(format!("http://{}:8372/mempool/health", url))
+                .get(format!("http://{}{}", region, DEEZ_PINGER_URL))
                 .send()
                 .await;
 
@@ -196,22 +205,21 @@ impl DeezEngineRelayerHandler {
                     let elapsed = start.elapsed();
                     if elapsed < shortest_time {
                         shortest_time = elapsed;
-                        closest_engine = url.to_string();
+                        clostest_region = region.to_string();
                     }
                 }
                 Err(_e) => {
-                    error!("error connecting to {}", url)
-                    // ignore for now
+                    error!("error connecting to {}", region)
                 }
             }
         }
 
-        if closest_engine.is_empty() {
+        if clostest_region.is_empty() {
             Err(DeezEngineError::CannotFindEngine(
                 "could not connect to any engine.".to_string(),
             ))
         } else {
-            Ok(format!("{}:8373", closest_engine))
+            Ok(format!("{}{}", clostest_region, DEEZ_ENGINE_URL))
         }
     }
 
