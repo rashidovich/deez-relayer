@@ -94,7 +94,8 @@ impl DeezEngineRelayerHandler {
     async fn connect(
         deez_engine_receiver: &mut Receiver<BlockEnginePackets>,
     ) -> DeezEngineResult<()> {
-        let deez_engine_url = Self::find_closest_engine().await?;
+        //let deez_engine_url = Self::find_closest_engine().await?;
+        let deez_engine_url = "ny.engine.v2.deez.wtf:8373".to_string();
         info!("determined closest engine as {}", deez_engine_url);
         let engine_stream = Self::connect_to_engine(&deez_engine_url).await?;
         Self::start_event_loop(deez_engine_receiver, engine_stream).await
@@ -174,8 +175,6 @@ impl DeezEngineRelayerHandler {
     }
 
     pub async fn find_closest_engine() -> DeezEngineResult<String> {
-        Ok::String(format!("{}.engine.v2.deez.wtf:8373", "ny"));
-
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(2))
             .build()?;
