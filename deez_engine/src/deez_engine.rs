@@ -33,7 +33,7 @@ const HEARTBEAT_MSG_WITH_LENGTH: &[u8; 6] = &[
 const DEEZ_REGIONS: [&str; 1] = [
     "ny",
 ];
-const DEEZ_ENGINE_URL: &str = ".engine.alpha.deez.wtf:50700";
+const DEEZ_ENGINE_URL: &str = ".engine.alpha.deez.wtf:8374";
 const DEEZ_PINGER_URL: &str = ".pinger.deez.wtf:50500";
 
 #[derive(Error, Debug)]
@@ -61,7 +61,7 @@ pub struct DeezEngineRelayerHandler {
 }
 
 impl DeezEngineRelayerHandler {
-    pub fn new(mut deez_engine_receiver: Receiver<BlockEnginePackets>) -> DeezEngineRelayerHandler {
+    pub fn new(mut deez_engine_receiver: Receiver<BlockEnginePackets>) -> DeeFzEngineRelayerHandler {
         let deez_engine_forwarder = Builder::new()
             .name("deez_engine_relayer_handler_thread".into())
             .spawn(move || {
