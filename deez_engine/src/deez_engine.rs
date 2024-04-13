@@ -178,7 +178,7 @@ impl DeezEngineRelayerHandler {
                 }
                 _ = heartbeat_interval.tick() => {
                     info!("sending heartbeat (deez)");
-                    Self::forward_packets(cloned_forwarder.clone(), HEARTBEAT_MSG).await?;
+                    Self::forward_packets(cloned_forwarder.clone(), HEARTBEAT_MSG_WITH_LENGTH).await?;
                 }
             }
         }
