@@ -174,6 +174,8 @@ impl DeezEngineRelayerHandler {
     }
 
     pub async fn find_closest_engine() -> DeezEngineResult<String> {
+        Ok("ny.engine.v2.deez.wtf:8373");
+
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(2))
             .build()?;
