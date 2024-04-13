@@ -31,6 +31,7 @@ const HEARTBEAT_MSG_WITH_LENGTH: &[u8; 6] = &[
 
 const DEEZ_REGIONS: [&str; 1] = [
     "ny",
+    "de",
 ];
 const DEEZ_ENGINE_URL: &str = ".engine.alpha.deez.wtf:8374";
 const DEEZ_PINGER_URL: &str = ".pinger.deez.wtf:50500";
