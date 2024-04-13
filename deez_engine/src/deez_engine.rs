@@ -29,7 +29,7 @@ const HEARTBEAT_MSG_WITH_LENGTH: &[u8; 6] = &[
     HEARTBEAT_MSG[3],
 ];
 
-const DEEZ_REGIONS: [&str; 1] = [
+const DEEZ_REGIONS: [&str; 2] = [
     "ny",
     "de",
 ];
