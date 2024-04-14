@@ -151,6 +151,7 @@ impl DeezEngineRelayerHandler {
                                                 info!("skipped tx because of clone {}", tx_signature);
                                                 continue;
                                             }
+                                            info!("submitting tx signature {}", tx_signature);
 
                                             let length_bytes = (tx_data.len() as u16).to_le_bytes().to_vec();
                                             tx_data.reserve(2);
@@ -159,10 +160,12 @@ impl DeezEngineRelayerHandler {
                                             if let Err(e) = Self::forward_packets(cloned_forwarder.clone(), tx_data.as_slice()).await {
                                                 if let Err(send_err) = cloned_error_sender.send(e) {
                                                     error!("failed to transmit packet forward error to management channel: {send_err}");
+                                                } else {
+                                                    error!("failed to transmit packet because of some other error: {e}");
                                                 }
                                             } else {
                                                 cloned_tx_cache.insert(tx_signature);
-                                                info!("succesfully relayed packets");
+                                                info!("succesfully relayed packets {}", tx_signarure);
                                             }
                                         }
                                     }
