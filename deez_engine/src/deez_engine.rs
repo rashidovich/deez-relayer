@@ -148,7 +148,7 @@ impl DeezEngineRelayerHandler {
                                             };
                                             let tx_signature = tx.signatures[0].to_string();
                                             if !is_tx_unique(&cloned_tx_cache, &tx_signature) {
-                                                info!("skipped tx because of clone")
+                                                info!("skipped tx because of clone");
                                                 continue;
                                             }
 
