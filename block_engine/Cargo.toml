@@ -15,6 +15,7 @@ jito-core = { workspace = true }
 jito-protos = { workspace = true }
 log = { workspace = true }
 prost-types = { workspace = true }
+rand.workspace = true
 reqwest = "0.11.25"
 solana-core = { workspace = true }
 solana-metrics = { workspace = true }
