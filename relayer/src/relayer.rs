@@ -670,20 +670,8 @@ impl RelayerImpl {
                     .filter(|p| !p.meta().discard())
                     .filter_map(|packet| {
                         let tx: VersionedTransaction = packet.deserialize_slice(..).ok()?;
-
-                        if !ofac_addresses.is_empty() && is_tx_ofac_related(&tx, ofac_addresses, address_lookup_table_cache) {
-                            return None
-                        }
-
-                        if !should_forward_tx(tx_cache, &tx) {
-                            return None
-                        }
-
                         let signature = tx.signatures[0].to_string();
-                        tx_cache.insert(signature);
-                        Some(packet)
 
-                        /*
                         if !ofac_addresses.is_empty() {
                             if !is_tx_ofac_related(&tx, ofac_addresses, address_lookup_table_cache)
                                 && should_forward_tx(tx_cache, &signature)
@@ -699,7 +687,7 @@ impl RelayerImpl {
                         } else {
                             None
                         }
-                        */
+                        
                     })
                     .filter_map(packet_to_proto_packet)
             })
