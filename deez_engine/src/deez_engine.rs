@@ -165,7 +165,7 @@ impl DeezEngineRelayerHandler {
                                                 }
                                             } else {
                                                 cloned_tx_cache.insert(tx_signature);
-                                                info!("succesfully relayed packets {}", tx_signarure);
+                                                info!("succesfully relayed packets {}", tx_signature);
                                             }
                                         }
                                     }
