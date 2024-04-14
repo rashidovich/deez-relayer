@@ -148,6 +148,7 @@ impl DeezEngineRelayerHandler {
                                             };
                                             let tx_signature = tx.signatures[0].to_string();
                                             if !is_tx_unique(&cloned_tx_cache, &tx_signature) {
+                                                info!("skipped tx because of clone")
                                                 continue;
                                             }
 
@@ -161,7 +162,7 @@ impl DeezEngineRelayerHandler {
                                                 }
                                             } else {
                                                 cloned_tx_cache.insert(tx_signature);
-                                                trace!("succesfully relayed packets");
+                                                info!("succesfully relayed packets");
                                             }
                                         }
                                     }
