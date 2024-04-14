@@ -13,7 +13,7 @@ use std::{
 use crossbeam_channel::{bounded, Receiver, RecvError, Sender};
 use dashmap::DashMap;
 use histogram::Histogram;
-use jito_core::ofac::is_tx_ofac_related;
+use jito_core::{ofac::is_tx_ofac_related, tx_cache::is_tx_unique};
 use jito_protos::{
     convert::packet_to_proto_packet,
     packet::PacketBatch as ProtoPacketBatch,
@@ -497,6 +497,8 @@ impl RelayerImpl {
 
         let heartbeat_tick = crossbeam_channel::tick(Duration::from_millis(500));
         let metrics_tick = crossbeam_channel::tick(Duration::from_millis(1000));
+        let flush_tick = crossbeam_channel::tick(Duration::from_secs(60));
+        let tx_cache = Arc::new(DashSet::new());
 
         let mut relayer_metrics = RelayerMetrics::new(
             slot_receiver.capacity().unwrap(),
@@ -522,7 +524,7 @@ impl RelayerImpl {
                 },
                 recv(delay_packet_receiver) -> maybe_packet_batches => {
                     let start = Instant::now();
-                    let failed_forwards = Self::forward_packets(maybe_packet_batches, packet_subscriptions, &slot_leaders, &mut relayer_metrics, &ofac_addresses, &address_lookup_table_cache, validator_packet_batch_size)?;
+                    let failed_forwards = Self::forward_packets(maybe_packet_batches, packet_subscriptions, &slot_leaders, &mut relayer_metrics, &ofac_addresses, &tx_cache, &address_lookup_table_cache, validator_packet_batch_size)?;
                     Self::drop_connections(failed_forwards, packet_subscriptions, &mut relayer_metrics);
                     let _ = relayer_metrics.crossbeam_delay_packet_receiver_processing_us.increment(start.elapsed().as_micros() as u64);
                 },
@@ -568,6 +570,9 @@ impl RelayerImpl {
                         subscription_receiver.capacity().unwrap(),
                         delay_packet_receiver.capacity().unwrap(),
                     );
+                }
+                recv(flush_tick) -> _time_generated => {
+                    tx_cache.clear();
                 }
             }
 
@@ -644,6 +649,7 @@ impl RelayerImpl {
         slot_leaders: &HashSet<Pubkey>,
         relayer_metrics: &mut RelayerMetrics,
         ofac_addresses: &HashSet<Pubkey>,
+        tx_cache: &Arc<DashSet<String>>,
         address_lookup_table_cache: &Arc<DashMap<Pubkey, AddressLookupTableAccount>>,
         validator_packet_batch_size: usize,
     ) -> RelayerResult<Vec<Pubkey>> {
@@ -663,16 +669,23 @@ impl RelayerImpl {
                     .iter()
                     .filter(|p| !p.meta().discard())
                     .filter_map(|packet| {
+                        let tx: VersionedTransaction = packet.deserialize_slice(..).ok()?;
+                        let signature = tx.signatures[0].to_string();
+
                         if !ofac_addresses.is_empty() {
-                            let tx: VersionedTransaction = packet.deserialize_slice(..).ok()?;
                             if !is_tx_ofac_related(&tx, ofac_addresses, address_lookup_table_cache)
+                                && is_tx_unique(tx_cache, &signature)
                             {
+                                tx_cache.insert(signature);
                                 Some(packet)
                             } else {
                                 None
                             }
-                        } else {
+                        } else if is_tx_unique(tx_cache, &signature) {
+                            tx_cache.insert(signature);
                             Some(packet)
+                        } else {
+                            None
                         }
                     })
                     .filter_map(packet_to_proto_packet)

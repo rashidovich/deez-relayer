@@ -5,7 +5,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+use dashmap::DashSet;
 use jito_block_engine::block_engine::BlockEnginePackets;
+use jito_core::tx_cache::is_tx_unique;
 use log::*;
 use solana_sdk::transaction::VersionedTransaction;
 use thiserror::Error;
@@ -117,11 +119,14 @@ impl DeezEngineRelayerHandler {
     ) -> DeezEngineResult<()> {
         let forwarder = Arc::new(Mutex::new(deez_engine_stream));
         let mut heartbeat_interval = interval(Duration::from_secs(5));
+        let mut flush_interval = interval(Duration::from_secs(60));
+        let tx_cache = Arc::new(DashSet::new());
         let (forward_error_sender, mut forward_error_receiver) = mpsc::unbounded_channel();
          
         loop {
             let cloned_forwarder = forwarder.clone();
             let cloned_error_sender = forward_error_sender.clone();
+            let cloned_tx_cache = tx_cache.clone();
 
             select! {
                 recv_result = deez_engine_receiver.recv() => {
@@ -141,6 +146,10 @@ impl DeezEngineRelayerHandler {
                                                 Ok(data) => data,
                                                 Err(_) => continue,
                                             };
+                                            let tx_signature = tx.signatures[0].to_string();
+                                            if !is_tx_unique(&cloned_tx_cache, &tx_signature) {
+                                                continue;
+                                            }
 
                                             let length_bytes = (tx_data.len() as u16).to_le_bytes().to_vec();
                                             tx_data.reserve(2);
@@ -151,6 +160,7 @@ impl DeezEngineRelayerHandler {
                                                     error!("failed to transmit packet forward error to management channel: {send_err}");
                                                 }
                                             } else {
+                                                cloned_tx_cache.insert(tx_signature);
                                                 trace!("succesfully relayed packets");
                                             }
                                         }
@@ -180,6 +190,10 @@ impl DeezEngineRelayerHandler {
                 _ = heartbeat_interval.tick() => {
                     info!("sending heartbeat (deez)");
                     Self::forward_packets(cloned_forwarder.clone(), HEARTBEAT_MSG_WITH_LENGTH).await?;
+                }
+                _ = flush_interval.tick() => {
+                    info!("flushing signature cache");
+                    tx_cache.clear();
                 }
             }
         }
