@@ -13,7 +13,7 @@ use std::{
 use crossbeam_channel::{bounded, Receiver, RecvError, Sender};
 use dashmap::{DashMap, DashSet};
 use histogram::Histogram;
-use jito_core::{ofac::is_tx_ofac_related, tx_cache::is_tx_unique};
+use jito_core::{ofac::is_tx_ofac_related, tx_cache::should_forward_tx};
 use jito_protos::{
     convert::packet_to_proto_packet,
     packet::PacketBatch as ProtoPacketBatch,
@@ -670,23 +670,36 @@ impl RelayerImpl {
                     .filter(|p| !p.meta().discard())
                     .filter_map(|packet| {
                         let tx: VersionedTransaction = packet.deserialize_slice(..).ok()?;
-                        let signature = tx.signatures[0].to_string();
 
+                        if !ofac_addresses.is_empty() && is_tx_ofac_related(&tx, ofac_addresses, address_lookup_table_cache) {
+                            return None
+                        }
+
+                        if !should_forward_tx(tx_cache, &tx) {
+                            return None
+                        }
+
+                        let signature = tx.signatures[0].to_string();
+                        tx_cache.insert(signature);
+                        Some(packet)
+
+                        /*
                         if !ofac_addresses.is_empty() {
                             if !is_tx_ofac_related(&tx, ofac_addresses, address_lookup_table_cache)
-                                && is_tx_unique(tx_cache, &signature)
+                                && should_forward_tx(tx_cache, &signature)
                             {
                                 tx_cache.insert(signature);
                                 Some(packet)
                             } else {
                                 None
                             }
-                        } else if is_tx_unique(tx_cache, &signature) {
+                        } else if should_forward_tx(tx_cache, &signature) {
                             tx_cache.insert(signature);
                             Some(packet)
                         } else {
                             None
                         }
+                        */
                     })
                     .filter_map(packet_to_proto_packet)
             })

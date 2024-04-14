@@ -7,7 +7,7 @@ use std::{
 
 use dashmap::DashSet;
 use jito_block_engine::block_engine::BlockEnginePackets;
-use jito_core::tx_cache::is_tx_unique;
+use jito_core::tx_cache::should_forward_tx;
 use log::*;
 use solana_sdk::transaction::VersionedTransaction;
 use thiserror::Error;
@@ -147,11 +147,9 @@ impl DeezEngineRelayerHandler {
                                                 Err(_) => continue,
                                             };
                                             let tx_signature = tx.signatures[0].to_string();
-                                            if !is_tx_unique(&cloned_tx_cache, &tx_signature) {
-                                                info!("skipped tx because of clone {}", tx_signature);
+                                            if !should_forward_tx(&cloned_tx_cache, &tx_signature) {
                                                 continue;
                                             }
-                                            info!("submitting tx signature {}", tx_signature.clone());
 
                                             let length_bytes = (tx_data.len() as u16).to_le_bytes().to_vec();
                                             tx_data.reserve(2);
@@ -160,11 +158,11 @@ impl DeezEngineRelayerHandler {
                                             if let Err(e) = Self::forward_packets(cloned_forwarder.clone(), tx_data.as_slice()).await {
                                                 if let Err(send_err) = cloned_error_sender.send(e) {
                                                     error!("failed to transmit packet forward error to management channel: {send_err}");
-                                                } else {
-                                                    error!("failed to transmit packet because of some other error");
                                                 }
                                             } else {
+                                                // if send successful, add signature to cache
                                                 cloned_tx_cache.insert(tx_signature);
+                                                trace!("successfully relayed packets to deez_engine");
                                             }
                                         }
                                     }
