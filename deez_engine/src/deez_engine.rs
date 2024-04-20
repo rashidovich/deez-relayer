@@ -21,12 +21,12 @@ use tokio::{
 
 const DELIMITER: &[u8; 1] = b"\n";
 const HEARTBEAT_MSG: &[u8; 5] = b"ping\n";
-const DEEZ_ENGINE_URLS: [&str; 5] = [
-    "ny.engine.deez.wtf",
-    "utah.engine.deez.wtf",
-    "amsterdam.engine.deez.wtf",
-    "london.engine.deez.wtf",
-    "tokyo.engine.deez.wtf",
+const DEEZ_ENGINE_URLS: [&str; 2] = [
+    "ny.engine.legacy.deez.wtf",
+    //"utah.engine.deez.wtf",
+    "amsterdam.engine.legacy.deez.wtf",
+    //"london.engine.deez.wtf",
+    //"tokyo.engine.deez.wtf",
 ];
 
 #[derive(Error, Debug)]
