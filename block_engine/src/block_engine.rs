@@ -25,7 +25,7 @@ use jito_protos::{
     },
     convert::packet_to_proto_packet,
     packet::PacketBatch as ProtoPacketBatch,
-    shared::Header,
+    shared::{Header, Heartbeat},
 };
 use log::{error, *};
 use prost_types::Timestamp;
@@ -40,9 +40,10 @@ use thiserror::Error;
 use tokio::{
     runtime::Runtime,
     select,
-    sync::{mpsc::Sender, broadcast::Receiver},
+    sync::{broadcast::Receiver, mpsc::channel as mpsc_channel, mpsc::Sender},
     time::{interval, sleep},
 };
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::{
     codegen::InterceptedService,
     service::Interceptor,
@@ -136,7 +137,7 @@ impl BlockEngineRelayerHandler {
                                 &is_connected_to_block_engine,
                                 &ofac_addresses,
                             )
-                                .await;
+                            .await;
                             is_connected_to_block_engine.store(false, Ordering::Relaxed);
 
                             if let Err(e) = result {
@@ -294,7 +295,7 @@ impl BlockEngineRelayerHandler {
             is_connected_to_block_engine,
             ofac_addresses,
         )
-            .await
+        .await
     }
 
     /// Starts the bi-directional packet stream.
@@ -325,7 +326,16 @@ impl BlockEngineRelayerHandler {
             .await
             .map_err(|e| BlockEngineError::BlockEngineFailure(e.to_string()))?;
 
+        // sender tracked as block_engine_relayer-loop_stats.block_engine_packet_sender_len
+        let (block_engine_packet_sender, block_engine_packet_receiver) =
+            mpsc_channel(Self::BLOCK_ENGINE_PACKET_QUEUE_CAPACITY);
+        let _response = client
+            .start_expiring_packet_stream(ReceiverStream::new(block_engine_packet_receiver))
+            .await
+            .map_err(|e| BlockEngineError::BlockEngineFailure(e.to_string()))?;
+
         Self::handle_packet_stream(
+            block_engine_packet_sender,
             block_engine_receiver,
             subscribe_aoi_stream,
             subscribe_poi_stream,
@@ -339,11 +349,12 @@ impl BlockEngineRelayerHandler {
             is_connected_to_block_engine,
             ofac_addresses,
         )
-            .await
+        .await
     }
 
     #[allow(clippy::too_many_arguments)]
     async fn handle_packet_stream(
+        block_engine_packet_sender: Sender<PacketBatchUpdate>,
         block_engine_receiver: &mut Receiver<BlockEnginePackets>,
         subscribe_aoi_stream: Response<Streaming<AccountsOfInterestUpdate>>,
         subscribe_poi_stream: Response<Streaming<ProgramsOfInterestUpdate>>,
@@ -385,7 +396,7 @@ impl BlockEngineRelayerHandler {
 
                     let now = Instant::now();
 
-                    Self::check_and_send_heartbeat(&heartbeat_count).await?;
+                    Self::check_and_send_heartbeat(&block_engine_packet_sender, &heartbeat_count).await?;
 
                     block_engine_stats.increment_heartbeat_elapsed_us(now.elapsed().as_micros() as u64);
                     block_engine_stats.increment_heartbeat_count(1);
@@ -429,13 +440,11 @@ impl BlockEngineRelayerHandler {
 
                     if let Some(filtered_packets) = filtered_packets {
                         let now = Instant::now();
-                        let packet_forward_count = filtered_packets.batch.as_ref().unwrap().packets.len();
-                        // random millis between 0 and 150
-                        sleep(Duration::from_millis(rand::thread_rng().gen_range(0..150))).await;
-                        // let packet_forward_count = Self::forward_packets(&block_engine_packet_sender, filtered_packets).await?;
+                        let packet_forward_count = Self::forward_packets(&block_engine_packet_sender, filtered_packets).await?;
                         block_engine_stats.increment_packet_forward_count(packet_forward_count as u64);
                         block_engine_stats.increment_packet_forward_elapsed_us(now.elapsed().as_micros() as u64);
                     }
+
                 }
                 _ = auth_refresh_interval.tick() => {
                     trace!("refreshing auth interval");
@@ -471,8 +480,7 @@ impl BlockEngineRelayerHandler {
             let capacity = rand::thread_rng().gen_range(0..1000);
 
             block_engine_stats.update_block_engine_packet_sender_len(
-                (Self::BLOCK_ENGINE_PACKET_QUEUE_CAPACITY - capacity)
-                    as u64,
+                (Self::BLOCK_ENGINE_PACKET_QUEUE_CAPACITY - capacity) as u64,
             );
         }
         Ok(())
@@ -607,7 +615,7 @@ impl BlockEngineRelayerHandler {
     }
 
     /// Forwards packets to the Block Engine
-    async fn _forward_packets(
+    async fn forward_packets(
         block_engine_packet_sender: &Sender<PacketBatchUpdate>,
         batch: ExpiringPacketBatch,
     ) -> BlockEngineResult<usize> {
@@ -649,23 +657,23 @@ impl BlockEngineRelayerHandler {
                     let is_forwardable = if ofac_addresses.is_empty() {
                         is_aoi_in_static_keys(&tx, accounts_of_interest, programs_of_interest)
                             || is_aoi_in_lookup_table(
-                            &tx,
-                            accounts_of_interest,
-                            programs_of_interest,
-                            address_lookup_table_cache,
-                        )
+                                &tx,
+                                accounts_of_interest,
+                                programs_of_interest,
+                                address_lookup_table_cache,
+                            )
                     } else {
                         !is_tx_ofac_related(&tx, ofac_addresses, address_lookup_table_cache)
                             && (is_aoi_in_static_keys(
-                            &tx,
-                            accounts_of_interest,
-                            programs_of_interest,
-                        ) || is_aoi_in_lookup_table(
-                            &tx,
-                            accounts_of_interest,
-                            programs_of_interest,
-                            address_lookup_table_cache,
-                        ))
+                                &tx,
+                                accounts_of_interest,
+                                programs_of_interest,
+                            ) || is_aoi_in_lookup_table(
+                                &tx,
+                                accounts_of_interest,
+                                programs_of_interest,
+                                address_lookup_table_cache,
+                            ))
                     };
 
                     if is_forwardable {
@@ -695,22 +703,22 @@ impl BlockEngineRelayerHandler {
     /// Checks the heartbeat timeout and errors out if the heartbeat didn't come in time.
     /// Assuming that's okay, sends a heartbeat back and if that fails, disconnect.
     async fn check_and_send_heartbeat(
-        // block_engine_packet_sender: &Sender<PacketBatchUpdate>,
-        _heartbeat_count: &u64,
+        block_engine_packet_sender: &Sender<PacketBatchUpdate>,
+        heartbeat_count: &u64,
     ) -> BlockEngineResult<()> {
-        // if let Err(e) = block_engine_packet_sender
-        //     .send(PacketBatchUpdate {
-        //         msg: Some(Msg::Heartbeat(Heartbeat {
-        //             count: *heartbeat_count,
-        //         })),
-        //     })
-        //     .await
-        // {
-        //     error!("error sending heartbeat {}", e);
-        //     return Err(BlockEngineError::BlockEngineFailure(
-        //         "error sending heartbeat".to_string(),
-        //     ));
-        // }
+        if let Err(e) = block_engine_packet_sender
+            .send(PacketBatchUpdate {
+                msg: Some(Msg::Heartbeat(Heartbeat {
+                    count: *heartbeat_count,
+                })),
+            })
+            .await
+        {
+            error!("error sending heartbeat {}", e);
+            return Err(BlockEngineError::BlockEngineFailure(
+                "error sending heartbeat".to_string(),
+            ));
+        }
 
         Ok(())
     }
